@@ -1,0 +1,1 @@
+This repository is for STA380 for Greg Merchant. The site will be used for homework submission and scribe note submission
