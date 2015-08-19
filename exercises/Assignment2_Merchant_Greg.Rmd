@@ -1,0 +1,326 @@
+---
+title: "Exercise 2"
+author: "Greg Merchant"
+date: "August 1, 2015"
+output: html_document
+---
+
+
+# Flights at ABIA
+```{r}
+library(reshape2)
+library(ggplot2)
+library(plyr)
+flights = read.csv('../data/ABIA.csv')
+names(flights)
+dim(flights)
+smaller = flights[-c(10,11,12,13,14,19,20,21,23,24,25,26,27,28,29)]
+names(smaller)
+#convert a date object
+smaller$depdate = as.Date(paste(smaller$DayofMonth,smaller$Month,smaller$Year,sep="."),"%d.%m.%Y")
+
+GetHour= function(time){
+        if (nchar(time) == 4){
+                return (substr(time,1,2))
+        }
+        return (substr(time,1,1))
+}
+
+smaller$hour = lapply(smaller$CRSDepTime,GetHour)
+
+
+totaldelay = rowsum(smaller[c(10,11)],factor(smaller$depdate),na.action=na.pass, na.rm = TRUE)
+avgDailyDelay = aggregate (smaller[c(10,11)],list(smaller$depdate),FUN= mean, na.action = na.pass, na.rm = TRUE)
+names(avgDailyDelay) = c('D1ay','ArrDelay','DepDelay')
+avgDailyDelay_long = melt(avgDailyDelay,id="D1ay")
+
+avgDailyDelay = aggregate(smaller[c(10,11)],list(smaller$depdate),FUN=mean,na.action=na.pass, na.rm= TRUE)
+
+avgMonthlyDelay= aggregate(smaller[c(10,11)],list(smaller$Month),FUN = mean, na.action = na.pass, na.rm = TRUE)
+
+
+
+totalMonthlyCancelation = rowsum(smaller[14],factor(smaller$Month), na.action= na.pass, na.rm = TRUE)
+
+
+
+
+names(avgMonthlyDelay) = c('Mon','ArrDelay','DepDelay')
+months = c('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec')
+avgMonthlyDelay$Mon = months
+totalMonthlyCancelation$Mon = c(1,2,3,4,5,6,7,8,9,10,11,12)
+
+
+
+
+
+lapply(avgMonthlyDelay,class)
+
+names(avgDailyDelay_long)
+
+melted = melt(avgMonthlyDelay,id="Mon")
+melted$Mon = factor(melted$Mon, level = months)
+melted2 = cbind(melted,totalMonthlyCancelation)
+
+
+```
+
+I decided to look at both departure and arrival delays at ABIA over the 12 month period. I ultiamtely decided to look at if a person was to be delayed- how long would it be for? If I were to include 0's then the average delays would drop significantly, and I really wanted to capture the "what-if" scenario when your flight is delayed.
+
+```{r echo=FALSE}
+library(gtable)
+library(grid)
+ggplot(data=melted, aes(Mon,value, fill=factor(variable)))+geom_bar(position="dodge", stat = "identity") + scale_x_discrete( name = "Month" )+scale_y_continuous(name="Delay")+labs(aesthetic='Delay')+ggtitle("Average Delay by Month and Type")
+
+
+
+
+
+```
+
+
+# Author Atribution
+
+
+```{r}
+library(tm)
+library(arules)
+author_dirs_train = Sys.glob('../data/ReutersC50/C50train/*')
+author_dirs_test = Sys.glob('../data/ReutersC50/C50test/*')
+author_dirs_train = author_dirs_train[1:50]
+author_dirs_test = author_dirs_test[1:50]
+file_list_train = NULL
+file_list_test = NULL
+train_labels = NULL
+test_labels = NULL
+
+
+readerPlain = function(fname){
+        readPlain(elem=list(content=readLines(fname)),
+                  id=fname, language='en') }
+
+for(author in author_dirs_train) {
+	author_name = substring(author, first=29)
+	files_to_add = Sys.glob(paste0(author, '/*.txt'))
+	file_list_train = append(file_list_train, files_to_add)
+	train_labels = append(train_labels, rep(author_name, length(files_to_add)))
+}
+
+for(author in author_dirs_test) {
+	author_name = substring(author, first=28)
+	files_to_add = Sys.glob(paste0(author, '/*.txt'))
+	file_list_test = append(file_list_test, files_to_add)
+	test_labels = append(test_labels, rep(author_name, length(files_to_add)))
+}
+
+
+#Not sure if I need this yet
+uniquenames = unique(train_labels)
+
+#training set up
+train_docs = lapply(file_list_train, readerPlain) 
+names(train_docs) = file_list_train
+names(train_docs) = sub('.txt', '', names(train_docs))
+
+train_corpus = Corpus(VectorSource(train_docs))
+names(train_corpus) = train_labels
+
+train_corpus = tm_map(train_corpus, content_transformer(tolower)) # make everything lowercase
+train_corpus = tm_map(train_corpus, content_transformer(removeNumbers)) # remove numbers
+train_corpus = tm_map(train_corpus, content_transformer(removePunctuation)) # remove punctuation
+train_corpus = tm_map(train_corpus, content_transformer(stripWhitespace)) ## remove excess white-space
+train_corpus = tm_map(train_corpus, content_transformer(removeWords), stopwords("SMART"))
+
+DTM_train = DocumentTermMatrix(train_corpus)
+
+DTM_train = removeSparseTerms(DTM_train, 0.975)
+
+#test set up
+test_docs = lapply(file_list_test, readerPlain) 
+names(test_docs) = file_list_test
+names(test_docs) = sub('.txt', '', names(test_docs))
+
+test_corpus = Corpus(VectorSource(test_docs))
+names(test_corpus) = test_labels
+
+test_corpus = tm_map(test_corpus, content_transformer(tolower)) # make everything lowercase
+test_corpus = tm_map(test_corpus, content_transformer(removeNumbers)) # remove numbers
+test_corpus = tm_map(test_corpus, content_transformer(removePunctuation)) # remove punctuation
+test_corpus = tm_map(test_corpus, content_transformer(stripWhitespace)) ## remove excess white-space
+test_corpus = tm_map(test_corpus, content_transformer(removeWords), stopwords("SMART"))
+
+DTM_test = DocumentTermMatrix(test_corpus)
+
+DTM_test = removeSparseTerms(DTM_test, 0.975)
+
+
+
+X_train = as.matrix(DTM_train)
+X_test = as.matrix(DTM_test)
+#Add authors name to the end
+
+
+trainnames = colnames(X_train)
+testnames = colnames(X_test)
+
+droptestwords = vector(length=0)
+for (word in testnames)  {if (!word %in% trainnames) {droptestwords = c(droptestwords,word)}}
+
+zerotrainwords = vector(length=0)
+for (word in trainnames)  {if (!word %in% testnames) {zerotrainwords = c(zerotrainwords,word)}}
+
+new_X_test = X_test[,!colnames(X_test) %in% droptestwords]
+new_X_train = X_train[,!colnames(X_train) %in% zerotrainwords]
+
+smooth_count = 1/nrow(X_train)
+
+train_smooth = new_X_train + smooth_count
+test_smooth = new_X_test + smooth_count
+
+author_matrix = rowsum(train_smooth, train_labels)
+author_sum = rowSums(author_matrix)
+log_author = log(author_matrix/author_sum)
+author_final = log_author[,!colnames(log_author) %in% zerotrainwords]
+
+
+
+prediction = author_final %*% t(new_X_test)
+pred_trans = t(prediction)
+
+
+
+author_prediction = colnames(pred_trans)[max.col(pred_trans)]
+author_actual = rownames(pred_trans)
+
+Correct_TF = as.integer(author_prediction == author_actual)
+total_correct = sum(Correct_TF)
+
+
+
+
+outcomes = cbind.data.frame(author_actual, author_prediction, Correct_TF)
+percent_correct = sum(Correct_TF)/length(Correct_TF)
+
+correct_by_author = aggregate.data.frame(outcomes$Correct_TF, by=list(authors = outcomes$author_actual), FUN = sum)
+correct_by_author$percent = correct_by_author$x/50
+correct_by_author = as.data.frame(correct_by_author)
+
+
+ordered = correct_by_author[order(correct_by_author$percent),]
+```
+After wrangling the data I got Naive Bayes to work. The bottom 5 authors that Naive Bayes
+struggeled the most to classify were:
+```{r}
+head(ordered)
+
+
+```
+The top 5 that Niave Bayes best preidcted are listed below with their percentage correct.
+```{r}
+tail(ordered)
+
+```
+
+I attempted several- the steps I took for all three were listed below.
+
+I decide to attempt to use boosting becuase it has beena  powerful tool in the past- and a good means
+of getting a baselines. Unfortunately for this type of classification- Boosting did not perform well.
+```{r Boosting}
+library(adabag)
+
+
+train_log_matrix = log(train_smooth)
+test_log_matrix = log(test_smooth)
+
+
+trainDF = as.data.frame(train_log_matrix, row.names = file_list_train)
+trainDF$labels = factor(train_labels)
+testDF = as.data.frame(test_log_matrix, row.names = 1:2500)
+testDF$labels = factor(test_labels)
+```
+```{r}
+train.boosting = boosting(labels ~ . , data=trainDF, mfinal=100, control=rpart.control(maxdepth = 6))
+
+prediction = predict.boosting(train.boosting,newdata=testDF)
+```
+```{r}
+prediction$confusion
+table(prediction$class)
+
+test_pred = as.data.frame(prediction$class)
+names(test_pred) = 'pred'
+test_pred$actual = test_labels
+test_pred$check = 0
+
+train_error = 1-sum(train.boosting$class == trainDF$labels) / length(trainDF$labels)
+prediction$error
+```
+Boosting had an incredibly high error partially attributed to only 13 authors being represented, as such we'll try another method- Logistic regression.
+
+I believe that Logistic Regression should outperform Naive Bayes becuase Naive Bayes is hampered by it "Niaviety". Naive Bayes assumes that all items are independent, when in reality there are likely several words that are often paired together that act a stronger predictor than merely single-word frequencies.
+
+
+```{r}
+trainDF = as.data.frame(new_X_train,row.names = (1:2500))
+trainDF$label = train_labels
+testDF = as.data.frame(new_X_test, row.names =(1:2500))
+testDF$label = test_labels
+namedf = as.data.frame(uniquenames)
+
+
+FactDF = function(author,df) {
+        author_train = trainDF
+        author_train$Fact_target = 0
+        author_train$Fact_target = as.integer(author_train$label == author)
+        return (author_train)
+}
+
+test = apply(namedf, 1, FactDF, df=trainDF)
+
+
+mylogit = glm(Fact_target~.-label, data=test[[1]], family=binomial)
+```
+Ultiamtley I couldn't get logistic regression to converge. I'm usnure what the exact issue was, but the convergence never occured and thus I was unable to make a prediction.
+
+Next I tried randomForest.
+
+```{r warnings=FALSE}
+library(randomForest)
+set.seed(25)
+
+trainDF2 = trainDF
+trainDF2 = trainDF[-c(127)]
+testDF2 = testDF[-c(127)]
+rf_test = randomForest(factor(label)~.,data=trainDF2,mtry=15,ntree=150)
+rf_pred = predict(rf_test, newdata=testDF)
+rfDF = as.data.frame(rf_pred)
+rfDF$actual = test_labels
+rfDF$check = as.numeric(rfDF$actual == rfDF$rf_pred)
+sum(rfDF$check)/dim(rfDF)[1]
+correct_by_author2 = aggregate.data.frame(rfDF$check, by=list(authors = rfDF$actual), FUN = sum)
+
+correct_by_author2$percent = correct_by_author2$x/50
+correct_by_author2 = as.data.frame(correct_by_author2)
+
+ordered2 = correct_by_author2[order(correct_by_author2$percent),]
+head(ordered2)
+tail(ordered2)
+```
+
+So I was able to get a total of 60% accuracy using random Forest with a mtry of 15 and running 150 trees.
+
+Explain more. Naive Bayes seems to win. Seems that similar writers were difficult to classify based on ther DTM in both methods.
+
+#Practice with association rule mining
+
+```{r}
+library(arules)
+groceries <- read.transactions("../data/groceries.txt", format='basket',sep=',')
+groceryrules = apriori(groceries, parameter=list(support=.01, confidence=.5, maxlen=4))
+inspect(groceryrules)
+inspect(subset(groceryrules, subset=lift >3))
+inspect(subset(groceryrules, subset=confidence>.58))
+inspect(subset(groceryrules, subset=support > .011 & confidence > 0.55))
+
+```
+I used thresholds of 0.01 for support, 0.5 for confidence, and 4 for maxlen. Ultiatmely I came to theses values after trying various levles.
